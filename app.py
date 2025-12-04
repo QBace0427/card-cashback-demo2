@@ -70,39 +70,67 @@ def ask_ai(merchant_query, cards):
 
     card_list_text = "\n".join([f"- {c}" for c in cards])
 
-    prompt = f"""
-    請比較以下信用卡在「{merchant_query}」的回饋：
+    system_prompt = """
+    你是一個信用卡回饋 JSON 生產器。
+    你只能輸出 JSON，不可以輸出任何解釋、文字或其他符號。
+    JSON 必須遵守嚴格格式。
+    """
+
+    user_prompt = f"""
+    比較以下信用卡在「{merchant_query}」的回饋：
     {card_list_text}
 
-    請用 JSON 格式輸出：
+    嚴格輸出以下格式（不可多不可少）：
 
     {{
       "results": [
-        {{"card": "", "reward_percent": "", "note": ""}}
+        {{
+          "card": "",
+          "reward_percent": "",
+          "note": ""
+        }}
       ],
       "best_card": ""
     }}
     """
 
-    # ===== 第一次：最便宜模型 =====
+    # 第一次嘗試：最便宜
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini-quick",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=250
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=200
         )
-        return response.choices[0].message.content
-
-    except Exception:
-        time.sleep(1)
-
-        # ===== 第二次：較穩定模型 =====
+        raw = response.choices[0].message.content
+    except:
+        # 如果失敗就 fallback
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=250
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=200
         )
-        return response.choices[0].message.content
+        raw = response.choices[0].message.content
+
+    # 清理 AI 回覆，確保只剩 JSON
+    cleaned = raw.strip()
+
+    # 若 AI 回覆前後夾雜文字，自動抓出 JSON 主體
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[1]
+        cleaned = cleaned.replace("json", "").strip()
+
+    # 修正可能出現的結尾多逗號
+    cleaned = cleaned.replace(",\n      ]", "\n      ]")
+    cleaned = cleaned.replace(",\n    }", "\n    }")
+
+    return cleaned
+
 
 
 
