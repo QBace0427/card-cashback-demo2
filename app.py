@@ -28,7 +28,6 @@ selected_cards = st.multiselect(
 # ======================================
 # 可選消費地點（15 個）
 # ======================================
-
 merchant_options = [
     "YouTube",
     "Netflix",
@@ -44,7 +43,7 @@ merchant_options = [
     "Apple Store",
     "Google Play",
     "博客來 Books.com.tw",
-    "Momo 購物"
+    "Momo 購物",
 ]
 
 merchant = st.selectbox(
@@ -54,12 +53,9 @@ merchant = st.selectbox(
     placeholder="請選擇消費地點…"
 )
 
-# 也允許使用者輸入自己想要查的
+# 自訂輸入
 custom_input = st.text_input("或自行輸入消費地點（可選）")
-
-# 有輸入 custom_input 就覆蓋 selectbox
 merchant_final = custom_input if custom_input.strip() else merchant
-
 
 
 # ======================================
@@ -71,30 +67,30 @@ def ask_ai(merchant_query, cards):
     card_list_text = "\n".join([f"- {c}" for c in cards])
 
     system_prompt = """
-    你是一個信用卡回饋 JSON 生產器。
-    你只能輸出 JSON，不可以輸出任何解釋、文字或其他符號。
-    JSON 必須遵守嚴格格式。
+    你是一位信用卡回饋分析助手，只能輸出 JSON。
+    JSON 格式必須完全正確，不能包含索引（0:,1: 等）。
     """
 
     user_prompt = f"""
-    比較以下信用卡在「{merchant_query}」的回饋：
+    請比較以下信用卡在「{merchant_query}」的回饋：
     {card_list_text}
 
-    嚴格輸出以下格式（不可多不可少）：
+    嚴格輸出以下 JSON 格式：
 
     {{
-      "results": [
-        {{
-          "card": "",
-          "reward_percent": "",
-          "note": ""
-        }}
-      ],
-      "best_card": ""
+      "best_card": "",
+      "reward_percent": "",
+      "note": ""
     }}
+
+    注意：
+    - "best_card" 只能是一張卡。
+    - "reward_percent" 是該卡對這個通路的回饋%。
+    - "note" 請簡短描述理由，例如是否限月份、是否列入活動通路等。
+    - 請勿加入 results 陣列、索引編號、評論或其他文字。
     """
 
-    # 第一次嘗試：最便宜
+    # ===== 第一次：最便宜模型 =====
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini-quick",
@@ -102,40 +98,33 @@ def ask_ai(merchant_query, cards):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=200
+            max_tokens=120
         )
         raw = response.choices[0].message.content
-    except:
-        # 如果失敗就 fallback
+
+    except Exception:
+        time.sleep(1)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=200
+            max_tokens=120
         )
         raw = response.choices[0].message.content
 
-    # 清理 AI 回覆，確保只剩 JSON
     cleaned = raw.strip()
 
-    # 若 AI 回覆前後夾雜文字，自動抓出 JSON 主體
+    # 去除 ```json 區塊
     if cleaned.startswith("```"):
-        cleaned = cleaned.split("```")[1]
-        cleaned = cleaned.replace("json", "").strip()
-
-    # 修正可能出現的結尾多逗號
-    cleaned = cleaned.replace(",\n      ]", "\n      ]")
-    cleaned = cleaned.replace(",\n    }", "\n    }")
+        cleaned = cleaned.split("```")[1].replace("json", "").strip()
 
     return cleaned
 
 
-
-
 # ======================================
-# 按鈕執行
+# 按鈕執行 & 美觀表格呈現
 # ======================================
 if st.button("查詢回饋"):
 
@@ -153,9 +142,49 @@ if st.button("查詢回饋"):
 
     try:
         result = json.loads(raw)
-        st.success("以下為推薦結果：")
-        st.json(result)
+
+        best_card = result.get("best_card", "—")
+        reward_percent = result.get("reward_percent", "—")
+        note = result.get("note", "—")
+
+        st.success("最佳信用卡推薦如下：")
+
+        # ===== 美觀表格樣式 =====
+        st.markdown(f"""
+        <style>
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }}
+        th {{
+            background-color: #1f4435;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }}
+        td {{
+            background-color: #2c5a46;
+            color: #f0f0f0;
+            padding: 10px;
+            text-align: center;
+        }}
+        </style>
+
+        <table>
+            <tr>
+                <th>最佳卡片</th>
+                <th>回饋</th>
+                <th>說明</th>
+            </tr>
+            <tr>
+                <td>{best_card}</td>
+                <td><b>{reward_percent}</b></td>
+                <td>{note}</td>
+            </tr>
+        </table>
+        """, unsafe_allow_html=True)
 
     except:
-        st.error("AI 未能輸出正確 JSON，以下為原始內容：")
+        st.error("AI 無法輸出有效資料，以下為原始內容：")
         st.write(raw)
